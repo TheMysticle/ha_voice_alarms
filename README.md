@@ -211,7 +211,7 @@ Assistant: "Alarm 'work' set for 07:00 on mon, tue, wed, thu, fri"
 ## Technical Details
 
 ### Storage
-- **Alarms**: SQLite database (`alarms.db`) - persistent across restarts
+- **Alarms**: SQLite database (`<config>/.storage/alarm_assistant_alarms.db`, survives HACS updates) - persistent across restarts
 - **Timers**: In-memory storage - lost on restart
 - **Sounds**: `/www/alarm_sounds/` directory
 

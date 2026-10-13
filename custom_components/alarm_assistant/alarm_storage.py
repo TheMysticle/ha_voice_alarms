@@ -2,6 +2,7 @@
 import json
 import logging
 import os
+import shutil
 import sqlite3
 from datetime import datetime
 from typing import Any
@@ -13,6 +14,12 @@ class AlarmStorage:
     """Singleton class for managing alarm storage in SQLite."""
 
     _instance = None
+    _db_path: str | None = None
+
+    @classmethod
+    def configure(cls, db_path: str) -> None:
+        """Set the database location (must be outside the integration folder)."""
+        cls._db_path = db_path
 
     def __new__(cls):
         if cls._instance is None:
@@ -22,9 +29,17 @@ class AlarmStorage:
 
     def _init_db(self):
         """Initialize the SQLite database."""
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        db_path = os.path.join(base_dir, "alarms.db")
-        os.makedirs(base_dir, exist_ok=True)
+        legacy_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "alarms.db")
+        db_path = self._db_path or legacy_path
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+
+        # Migration: move DB from the integration folder (wiped by updates)
+        if db_path != legacy_path and not os.path.exists(db_path) and os.path.exists(legacy_path):
+            try:
+                shutil.move(legacy_path, db_path)
+                logger.info("Moved alarms.db from %s to %s", legacy_path, db_path)
+            except OSError as err:
+                logger.warning("Could not migrate legacy alarms.db: %s", err)
 
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.execute("""

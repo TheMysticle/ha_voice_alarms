@@ -35,6 +35,7 @@ class AlarmManager:
     def __init__(self, hass: HomeAssistant):
         """Initialize the alarm manager."""
         self.hass = hass
+        AlarmStorage.configure(hass.config.path(".storage", "alarm_assistant_alarms.db"))
         self.storage = AlarmStorage()
         self._scheduled_timers = {}
         self._auto_dismiss_timers = {}
