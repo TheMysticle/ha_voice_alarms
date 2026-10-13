@@ -13,7 +13,8 @@
           "auto_dismiss_duration": "Arrêt Automatique (minutes)",
           "custom_sound_path": "Chemin du Fichier Son Personnalisé",
           "led_entity": "Entité Anneau LED (Optionnel)",
-          "led_alarm_color": "Couleur LED d'Alarme"
+          "led_alarm_color": "Couleur LED d'Alarme",
+          "led_alarm_effect": "Effet LED de l'alarme"
         }
       }
     },
@@ -38,7 +39,8 @@
           "auto_dismiss_duration": "Arrêt Automatique (minutes)",
           "custom_sound_path": "Chemin du Fichier Son Personnalisé",
           "led_entity": "Entité Anneau LED (Optionnel)",
-          "led_alarm_color": "Couleur LED d'Alarme"
+          "led_alarm_color": "Couleur LED d'Alarme",
+          "led_alarm_effect": "Effet LED de l'alarme"
         }
       }
     }

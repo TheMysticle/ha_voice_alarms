@@ -12,6 +12,7 @@ from homeassistant.helpers import selector
 
 _LOGGER = logging.getLogger(__name__)
 
+from .led_effects import SUGGESTED as LED_EFFECT_SUGGESTIONS
 from .const import (
     ADDON_NAME,
     ALARM_SOUNDS,
@@ -20,15 +21,29 @@ from .const import (
     CONF_ALARM_VOLUME,
     CONF_AUTO_DISMISS_DURATION,
     CONF_LED_COLOR,
+    CONF_LED_EFFECT,
     CONF_LED_ENTITY,
     CONF_MEDIA_PLAYER,
     CONF_SNOOZE_DURATION,
     DEFAULT_AUTO_DISMISS_DURATION,
     DEFAULT_LED_COLOR,
+    DEFAULT_LED_EFFECT,
     DEFAULT_SNOOZE_DURATION,
     DOMAIN,
     SERVICE_DEFAULTS,
 )
+
+
+def _effect_selector() -> selector.SelectSelector:
+    """Effect names to pick from, or any text: the light decides at ring time."""
+    return selector.SelectSelector(
+        selector.SelectSelectorConfig(
+            options=LED_EFFECT_SUGGESTIONS,
+            custom_value=True,
+            mode=selector.SelectSelectorMode.DROPDOWN,
+        )
+    )
+
 
 if TYPE_CHECKING:  # pragma: no cover
     from homeassistant.config_entries import ConfigEntry, OptionsFlow
@@ -90,6 +105,10 @@ class AlarmAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_LED_COLOR,
                         default=DEFAULT_LED_COLOR,
                     ): selector.ColorRGBSelector(),
+                    vol.Optional(
+                        CONF_LED_EFFECT,
+                        default=DEFAULT_LED_EFFECT,
+                    ): _effect_selector(),
                 }
             )
 
@@ -180,6 +199,10 @@ class AlarmAssistantOptionsFlow(config_entries.OptionsFlow):
                     CONF_LED_COLOR,
                     default=defaults.get(CONF_LED_COLOR, DEFAULT_LED_COLOR),
                 ): selector.ColorRGBSelector(),
+                vol.Optional(
+                    CONF_LED_EFFECT,
+                    default=defaults.get(CONF_LED_EFFECT, DEFAULT_LED_EFFECT),
+                ): _effect_selector(),
             }
         )
 

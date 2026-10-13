@@ -66,4 +66,9 @@ RINGING_RESTART_GRACE = 5  # seconds to wait before restarting interrupted playb
 # LED ring control
 CONF_LED_ENTITY = "led_entity"
 CONF_LED_COLOR = "led_alarm_color"
+CONF_LED_EFFECT = "led_alarm_effect"
 DEFAULT_LED_COLOR = [255, 0, 0]  # Red
+# Effect the ring shows while an alarm rings, when the light has it. "Pulse" is
+# what EchoMuse's ring calls a sinusoidal throb; a light without that effect
+# just shows the colour (see led_effects.effect_to_send).
+DEFAULT_LED_EFFECT = "Pulse"

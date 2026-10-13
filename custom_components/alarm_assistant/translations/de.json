@@ -13,7 +13,8 @@
           "auto_dismiss_duration": "Automatische Abschaltung (Minuten)",
           "custom_sound_path": "Benutzerdefinierter Sound-Dateipfad",
           "led_entity": "LED-Ring Entität (Optional)",
-          "led_alarm_color": "Alarm-LED-Farbe"
+          "led_alarm_color": "Alarm-LED-Farbe",
+          "led_alarm_effect": "Alarm-LED-Effekt"
         }
       }
     },
@@ -38,7 +39,8 @@
           "auto_dismiss_duration": "Automatische Abschaltung (Minuten)",
           "custom_sound_path": "Benutzerdefinierter Sound-Dateipfad",
           "led_entity": "LED-Ring Entität (Optional)",
-          "led_alarm_color": "Alarm-LED-Farbe"
+          "led_alarm_color": "Alarm-LED-Farbe",
+          "led_alarm_effect": "Alarm-LED-Effekt"
         }
       }
     }

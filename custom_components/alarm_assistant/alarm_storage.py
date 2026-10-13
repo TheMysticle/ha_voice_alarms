@@ -36,7 +36,8 @@ class AlarmStorage:
                 repeat_days TEXT,
                 sound TEXT,
                 created_at INTEGER NOT NULL,
-                media_player TEXT
+                media_player TEXT,
+                led_effect TEXT
             )
         """)
         self._conn.commit()
@@ -49,6 +50,14 @@ class AlarmStorage:
         except sqlite3.OperationalError:
             pass  # Column already exists
 
+        # Migration: add led_effect column (the ring animation for this alarm)
+        try:
+            self._conn.execute("ALTER TABLE alarms ADD COLUMN led_effect TEXT")
+            self._conn.commit()
+            logger.info("Migrated alarms table: added led_effect column")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
         logger.info("Alarm database initialized at %s", db_path)
 
     def add_alarm(
@@ -58,6 +67,7 @@ class AlarmStorage:
         repeat_days: list[str] | None = None,
         sound: str = "default",
         media_player: str | None = None,
+        led_effect: str | None = None,
     ) -> int:
         """
         Add a new alarm.
@@ -68,6 +78,7 @@ class AlarmStorage:
             repeat_days: List of days (mon, tue, wed, thu, fri, sat, sun) or None for one-time
             sound: Sound to play
             media_player: Optional media player entity ID to play alarm on
+            led_effect: Optional ring effect for this alarm (overrides the configured one)
 
         Returns:
             The ID of the created alarm
@@ -77,10 +88,10 @@ class AlarmStorage:
 
         cursor = self._conn.execute(
             """
-            INSERT INTO alarms (name, time, enabled, repeat_days, sound, created_at, media_player)
-            VALUES (?, ?, 1, ?, ?, ?, ?)
+            INSERT INTO alarms (name, time, enabled, repeat_days, sound, created_at, media_player, led_effect)
+            VALUES (?, ?, 1, ?, ?, ?, ?, ?)
             """,
-            (name, time, repeat_days_json, sound, created_at, media_player),
+            (name, time, repeat_days_json, sound, created_at, media_player, led_effect),
         )
         self._conn.commit()
         alarm_id = cursor.lastrowid
@@ -91,7 +102,7 @@ class AlarmStorage:
         """Get all alarms."""
         cursor = self._conn.execute(
             """
-            SELECT id, name, time, enabled, repeat_days, sound, created_at, media_player
+            SELECT id, name, time, enabled, repeat_days, sound, created_at, media_player, led_effect
             FROM alarms
             ORDER BY time
             """
@@ -109,6 +120,7 @@ class AlarmStorage:
                     "sound": row[5],
                     "created_at": row[6],
                     "media_player": row[7],
+                    "led_effect": row[8],
                 }
             )
         return alarms

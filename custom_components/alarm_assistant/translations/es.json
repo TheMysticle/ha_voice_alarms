@@ -13,7 +13,8 @@
           "auto_dismiss_duration": "Desactivación Automática (minutos)",
           "custom_sound_path": "Ruta de Archivo de Sonido Personalizado",
           "led_entity": "Entidad Anillo LED (Opcional)",
-          "led_alarm_color": "Color LED de Alarma"
+          "led_alarm_color": "Color LED de Alarma",
+          "led_alarm_effect": "Efecto LED de la alarma"
         }
       }
     },
@@ -38,7 +39,8 @@
           "auto_dismiss_duration": "Desactivación Automática (minutos)",
           "custom_sound_path": "Ruta de Archivo de Sonido Personalizado",
           "led_entity": "Entidad Anillo LED (Opcional)",
-          "led_alarm_color": "Color LED de Alarma"
+          "led_alarm_color": "Color LED de Alarma",
+          "led_alarm_effect": "Efecto LED de la alarma"
         }
       }
     }

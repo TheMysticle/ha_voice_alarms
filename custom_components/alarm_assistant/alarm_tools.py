@@ -46,6 +46,10 @@ class SetAlarmTool(llm.Tool):
                 "media_player",
                 description="Optional media_player entity ID to play the alarm sound on. If not specified, the default configured media player will be used. Example: 'media_player.bedroom_speaker'",
             ): str,
+            vol.Optional(
+                "led_effect",
+                description="Optional animation for the device's LED ring while this alarm rings, only when the user asks for one. Options: Pulse, Fast pulse, Slow pulse, Spin, or None for a steady colour. If not specified, the configured default is used.",
+            ): str,
         }
     )
 
@@ -85,6 +89,7 @@ class SetAlarmTool(llm.Tool):
         repeat_days = tool_input.tool_args.get("repeat_days")
         sound = tool_input.tool_args.get("sound", "default")
         media_player = tool_input.tool_args.get("media_player")
+        led_effect = tool_input.tool_args.get("led_effect")
 
         _LOGGER.info("Setting alarm: %s at %s", name, time_str)
 
@@ -102,7 +107,7 @@ class SetAlarmTool(llm.Tool):
             storage = AlarmStorage()
             alarm_id = storage.add_alarm(
                 name=name, time=time_str, repeat_days=repeat_days, sound=sound,
-                media_player=media_player,
+                media_player=media_player, led_effect=led_effect,
             )
 
             # Schedule the alarm

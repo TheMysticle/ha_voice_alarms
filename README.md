@@ -103,6 +103,12 @@ The integration only provides the alarm and timer tools. Your LLM conversation a
 - **Auto-Dismiss Duration**: Stop a ringing alarm automatically after this many minutes (default: 10)
 - **LED Ring Entity**: Light entity that is lit while an alarm rings and restored afterwards, e.g. the LED ring of a voice satellite (optional)
 - **Alarm LED Color**: Color of the LED ring while an alarm rings (default: red)
+- **Alarm LED Effect**: Animation the ring shows while an alarm rings (default: `Pulse`). Pick one from the list or type any effect your light has. It is only sent if the light's own effect list contains it; a light without that effect, or without effects at all, shows the plain color. `None` gives a steady color and clears any effect the light was running. Whatever the light was doing before the alarm, effect included, is put back when the alarm stops.
+  A single alarm can have its own effect: ask for one when you set it ("set an alarm for 7 with a fast pulsing ring").
+
+### EchoMuse satellites
+
+With [EchoMuse](https://github.com/vithurshanselvarajah/EchoMuse) the Echo's ring is a light entity (`light.<name>_voice_assistant_ring`) with the effects `Pulse`, `Slow pulse`, `Fast pulse`, `Spin` and `None`. Choose it as the LED Ring Entity. The ring is a background layer there: it never paints over a voice turn, a reply or a ringing timer, so saying "stop" to a ringing alarm shows the normal listening ring and the alarm's ring returns afterwards.
 
 ### Available Sounds
 
