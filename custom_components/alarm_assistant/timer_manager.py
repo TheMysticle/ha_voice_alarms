@@ -30,9 +30,10 @@ class TimerManager:
         _LOGGER.info("Timer completed: %d (%s)", timer_id, timer_name)
 
         try:
-            # Activate LED ring briefly
             alarm_manager = self.hass.data.get(DOMAIN, {}).get("alarm_manager")
             if alarm_manager:
+                # Save previous volume and activate LED ring
+                await alarm_manager._save_volume_state(timer_media_player)
                 await alarm_manager._set_alarm_led()
 
             # Play timer sound
@@ -47,14 +48,15 @@ class TimerManager:
             # Cleanup old timers
             self.storage.cleanup_completed()
 
-            # Schedule LED restore after 30 seconds
+            # Schedule LED and Volume restore after 30 seconds
             if alarm_manager:
                 from homeassistant.helpers.event import async_call_later
 
-                async def restore_led(now):
+                async def restore_state(now):
                     await alarm_manager._restore_led_state()
+                    await alarm_manager._restore_volume_state(timer_media_player)
 
-                async_call_later(self.hass, 30, restore_led)
+                async_call_later(self.hass, 30, restore_state)
 
         except Exception as e:
             _LOGGER.error("Error triggering timer %d: %s", timer_id, e)
@@ -70,15 +72,10 @@ class TimerManager:
             return
 
         try:
-            # Get custom file path if sound is "custom"
             if sound == "custom":
                 custom_path = config_data.get("custom_sound_path")
-                if custom_path:
-                    sound_file = custom_path
-                else:
-                    sound_file = "/local/alarm_sounds/custom.mp3"
+                sound_file = custom_path if custom_path else "/local/alarm_sounds/custom.mp3"
             else:
-                # Map sound names to file paths
                 sound_map = {
                     "default": "/local/alarm_sounds/default.mp3",
                     "gentle": "/local/alarm_sounds/gentle.mp3",

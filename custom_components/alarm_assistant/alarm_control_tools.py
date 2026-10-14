@@ -38,26 +38,24 @@ class StopAlarmTool(llm.Tool):
         _LOGGER.info("Stopping ringing alarm")
 
         try:
-            # Get ringing alarms from hass.data (now a dict)
             ringing_alarms = hass.data.get(DOMAIN, {}).get("ringing_alarms", {})
 
             if not ringing_alarms:
                 return {"error": "No alarm is currently ringing"}
 
-            # Stop all ringing alarms
             count = 0
             for alarm_id, alarm_info in list(ringing_alarms.items()):
                 await self._stop_alarm(hass, alarm_id, alarm_info)
                 count += 1
 
-            # Clear ringing alarms dict
             if DOMAIN in hass.data:
                 hass.data[DOMAIN]["ringing_alarms"] = {}
 
-            # Restore LED state
+            # Restore LED & Volume state when alarm is stopped
             alarm_manager = hass.data.get(DOMAIN, {}).get("alarm_manager")
             if alarm_manager:
                 await alarm_manager._restore_led_state()
+                await alarm_manager._restore_volume_state()
 
             return self.wrap_response(
                 {
@@ -75,18 +73,15 @@ class StopAlarmTool(llm.Tool):
         """Stop a specific alarm."""
         alarm_manager = hass.data.get(DOMAIN, {}).get("alarm_manager")
 
-        # Stop the ringing watchdog so it doesn't restart the sound
         if alarm_manager and hasattr(alarm_manager, "cancel_ringing_watchdog"):
             alarm_manager.cancel_ringing_watchdog(alarm_id)
 
-        # Cancel auto-dismiss timer if it exists
         if alarm_manager and hasattr(alarm_manager, "_auto_dismiss_timers"):
             cancel_func = alarm_manager._auto_dismiss_timers.pop(alarm_id, None)
             if cancel_func:
                 cancel_func()
                 _LOGGER.debug("Cancelled auto-dismiss timer for alarm %d", alarm_id)
 
-        # Determine which media player to stop
         if alarm_info and alarm_info.get("media_player"):
             media_player = alarm_info["media_player"]
         else:
@@ -104,7 +99,6 @@ class StopAlarmTool(llm.Tool):
             except Exception as e:
                 _LOGGER.warning("Could not stop media player: %s", e)
 
-        # Dismiss notification
         try:
             await hass.services.async_call(
                 "persistent_notification",
@@ -148,7 +142,6 @@ class SnoozeAlarmTool(llm.Tool):
         """Call the tool to snooze ringing alarm."""
         duration_minutes = tool_input.tool_args.get("duration_minutes")
 
-        # Get snooze duration from config or use default
         if duration_minutes is None:
             config_data = hass.data.get(DOMAIN, {}).get("config", {})
             duration_minutes = config_data.get(
@@ -158,13 +151,11 @@ class SnoozeAlarmTool(llm.Tool):
         _LOGGER.info("Snoozing alarm for %d minutes", duration_minutes)
 
         try:
-            # Get ringing alarms from hass.data (now a dict)
             ringing_alarms = hass.data.get(DOMAIN, {}).get("ringing_alarms", {})
 
             if not ringing_alarms:
                 return {"error": "No alarm is currently ringing"}
 
-            # Cancel auto-dismiss timers and ringing watchdogs for all ringing alarms
             alarm_manager = hass.data[DOMAIN].get("alarm_manager")
             if alarm_manager:
                 for alarm_id in ringing_alarms:
@@ -176,7 +167,6 @@ class SnoozeAlarmTool(llm.Tool):
                             cancel_func()
                             _LOGGER.debug("Cancelled auto-dismiss timer for alarm %d during snooze", alarm_id)
 
-            # Stop each ringing alarm's media player
             stopped_players = set()
             config_data = hass.data.get(DOMAIN, {}).get("config", {})
             for alarm_id, alarm_info in ringing_alarms.items():
@@ -193,28 +183,22 @@ class SnoozeAlarmTool(llm.Tool):
                     except Exception as e:
                         _LOGGER.warning("Could not stop media player %s: %s", mp, e)
 
-            # Schedule alarm to ring again after snooze duration
             from homeassistant.helpers.event import async_call_later
 
             count = 0
-
             for alarm_id, alarm_info in list(ringing_alarms.items()):
-                # Get alarm details
                 from .alarm_storage import AlarmStorage
                 storage = AlarmStorage()
                 alarms = storage.get_all_alarms()
                 alarm = next((a for a in alarms if a["id"] == alarm_id), None)
 
                 if alarm:
-                    # Preserve the media player from the ringing info
                     alarm_with_mp = {**alarm}
                     if alarm_info.get("media_player") and not alarm.get("media_player"):
                         alarm_with_mp["media_player"] = alarm_info["media_player"]
 
-                    # Schedule snooze callback
                     async def snooze_callback(now, a=alarm_with_mp):
                         if alarm_manager:
-                            # Re-trigger the alarm with snoozed name
                             snoozed_alarm = {**a, "name": f"Snoozed: {a['name']}"}
                             await alarm_manager._trigger_alarm(snoozed_alarm)
 
@@ -223,13 +207,13 @@ class SnoozeAlarmTool(llm.Tool):
                     )
                     count += 1
 
-            # Clear ringing alarms dict and dismiss notifications
             if DOMAIN in hass.data:
                 hass.data[DOMAIN]["ringing_alarms"] = {}
 
-            # Restore LED state during snooze
+            # Restore LED & Volume state during snooze
             if alarm_manager:
                 await alarm_manager._restore_led_state()
+                await alarm_manager._restore_volume_state()
 
             for alarm_id in ringing_alarms:
                 try:
@@ -242,7 +226,6 @@ class SnoozeAlarmTool(llm.Tool):
                 except Exception as e:
                     _LOGGER.warning("Could not dismiss notification: %s", e)
 
-            # Calculate when alarm will ring again
             snooze_until = datetime.now() + timedelta(minutes=duration_minutes)
             snooze_time = snooze_until.strftime("%H:%M")
 

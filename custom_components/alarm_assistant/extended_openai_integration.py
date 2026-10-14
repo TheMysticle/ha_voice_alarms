@@ -24,7 +24,6 @@ def _schema_to_json(schema: vol.Schema) -> dict:
             k_name = getattr(key, "schema", str(key))
             k_desc = getattr(key, "description", None)
 
-            # Check if field is required
             if isinstance(key, vol.Required):
                 required.append(k_name)
 
@@ -32,7 +31,6 @@ def _schema_to_json(schema: vol.Schema) -> dict:
             if k_desc:
                 prop_info["description"] = k_desc
 
-            # Map Python types to JSON Schema types
             if value is str or value == str:
                 prop_info["type"] = "string"
             elif value is int or value == int:
@@ -99,7 +97,7 @@ async def async_patch_extended_openai(hass: HomeAssistant) -> None:
 
         _LOGGER.warning("SUCCESS: Patching Extended OpenAI Conversation (Stable v2.x) to add Voice Alarm Assistant tools!")
 
-        # 1. Create a custom FunctionExecutor for v2.x
+        # 1. Custom FunctionExecutor for v2.x
         class AlarmAssistantFunctionExecutor(FunctionExecutor):
             def __init__(self):
                 super().__init__(vol.Schema({
@@ -120,13 +118,10 @@ async def async_patch_extended_openai(hass: HomeAssistant) -> None:
                     if not target_tool:
                         return f"Error: Tool {tool_name} not found"
 
-                    # Safely extract or build LLMContext without keyword errors
-                    if hasattr(user_input, "as_llm_context"):
-                        llm_context = user_input.as_llm_context(DOMAIN)
-                    else:
-                        llm_context = None
+                    # Safely build context using Home Assistant's built-in helper
+                    llm_context = user_input.as_llm_context(DOMAIN) if hasattr(user_input, "as_llm_context") else None
 
-                    # Safe tool input structure
+                    # Safe tool input structure that cannot cause TypeError
                     class _ToolInput:
                         def __init__(self, name, args):
                             self.tool_name = name
@@ -147,7 +142,7 @@ async def async_patch_extended_openai(hass: HomeAssistant) -> None:
 
         FUNCTION_EXECUTORS["alarm_assistant"] = AlarmAssistantFunctionExecutor()
 
-        # 2. Monkey-patch get_functions to auto-inject your LLM tools
+        # 2. Auto-inject the tools without YAML config
         orig_get_functions = ExtendedOpenAIAgentEntity.get_functions
 
         def _patched_get_functions(self) -> list[dict]:
@@ -180,7 +175,7 @@ async def async_patch_extended_openai(hass: HomeAssistant) -> None:
 
         ExtendedOpenAIAgentEntity.get_functions = _patched_get_functions
 
-        # 3. Monkey-patch _async_generate_prompt
+        # 3. Inform the LLM HOW to use the alarms
         orig_async_generate_prompt = ExtendedOpenAIAgentEntity._async_generate_prompt
 
         def _patched_async_generate_prompt(self, raw_prompt, exposed_entities, user_input) -> str:

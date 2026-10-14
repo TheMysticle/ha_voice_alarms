@@ -51,7 +51,6 @@ class AlarmManager:
         self._running = True
         _LOGGER.info("Starting alarm manager")
 
-        # Load and schedule all enabled alarms
         alarms = self.storage.get_enabled_alarms()
         for alarm in alarms:
             await self._schedule_alarm(alarm)
@@ -63,17 +62,14 @@ class AlarmManager:
         _LOGGER.info("Stopping alarm manager")
         self._running = False
 
-        # Cancel all scheduled timers
         for timer_cancel in self._scheduled_timers.values():
             timer_cancel()
         self._scheduled_timers.clear()
 
-        # Cancel all auto-dismiss timers
         for timer_cancel in self._auto_dismiss_timers.values():
             timer_cancel()
         self._auto_dismiss_timers.clear()
 
-        # Cancel all ringing watchdogs
         for task in self._ringing_watchdogs.values():
             task.cancel()
         self._ringing_watchdogs.clear()
@@ -85,16 +81,10 @@ class AlarmManager:
         repeat_days = alarm.get("repeat_days")
 
         try:
-            # Parse the alarm time
             hour, minute = map(int, time_str.split(":"))
-
-            # Calculate next trigger time
             next_trigger = self._calculate_next_trigger(hour, minute, repeat_days)
 
             if next_trigger:
-                # Schedule the alarm. The callback must be a coroutine function
-                # so it runs on the event loop - a plain lambda would be run in
-                # an executor thread, where async_create_task raises RuntimeError
                 async def _handle_trigger(now, alarm=alarm):
                     await self._trigger_alarm(alarm)
 
@@ -117,30 +107,20 @@ class AlarmManager:
     ) -> datetime | None:
         """Calculate the next trigger time for an alarm."""
         now = dt_util.now()
-
-        # Create a timezone-aware datetime for today at the alarm time
-        # Start with the beginning of today in local timezone
         today_start = dt_util.start_of_local_day()
         alarm_time = today_start.replace(hour=hour, minute=minute, second=0, microsecond=0)
 
         if repeat_days:
-            # Repeating alarm - find next occurrence
             day_map = {
-                "mon": 0,
-                "tue": 1,
-                "wed": 2,
-                "thu": 3,
-                "fri": 4,
-                "sat": 5,
-                "sun": 6,
+                "mon": 0, "tue": 1, "wed": 2, "thu": 3,
+                "fri": 4, "sat": 5, "sun": 6,
             }
             target_days = [day_map[day.lower()] for day in repeat_days if day.lower() in day_map]
 
             if not target_days:
                 return None
 
-            # Find the next day that matches
-            for days_ahead in range(8):  # Check up to 7 days ahead + today
+            for days_ahead in range(8):
                 check_time = today_start + timedelta(days=days_ahead)
                 check_time = check_time.replace(hour=hour, minute=minute, second=0, microsecond=0)
 
@@ -149,11 +129,9 @@ class AlarmManager:
 
             return None
         else:
-            # One-time alarm
             if alarm_time > now:
                 return alarm_time
             else:
-                # If time has passed today, schedule for tomorrow
                 tomorrow_time = today_start + timedelta(days=1)
                 alarm_time = tomorrow_time.replace(hour=hour, minute=minute, second=0, microsecond=0)
                 return alarm_time
@@ -168,11 +146,9 @@ class AlarmManager:
         _LOGGER.info("Triggering alarm %d: %s", alarm_id, alarm_name)
 
         try:
-            # Resolve effective media player
             config_data = self.hass.data.get(DOMAIN, {}).get("config", {})
             effective_media_player = alarm_media_player or config_data.get(CONF_MEDIA_PLAYER)
 
-            # Track ringing alarm with its media player
             if DOMAIN not in self.hass.data:
                 self.hass.data[DOMAIN] = {}
             if "ringing_alarms" not in self.hass.data[DOMAIN]:
@@ -183,36 +159,74 @@ class AlarmManager:
                 "led_effect": alarm.get("led_effect"),
             }
 
+            # Save the current volume BEFORE playing the alarm
+            await self._save_volume_state(effective_media_player)
+
             # Play alarm sound
             await self._play_alarm_sound(alarm_sound, media_player_override=alarm_media_player)
 
-            # Activate LED ring. Done after the sound is started because some
-            # voice satellites repaint their LED ring on volume/playback changes
+            # Activate LED ring
             await self._set_alarm_led(alarm_id)
 
-            # Keep the sound ringing until the alarm is stopped, snoozed
-            # or auto-dismissed (saying the wake word interrupts playback)
             if effective_media_player:
                 self._start_ringing_watchdog(
                     alarm_id, alarm_sound, effective_media_player
                 )
 
-            # Send notification (optional)
             await self._send_notification(alarm_name, alarm_id)
-
-            # Schedule auto-dismiss after configured duration
             await self._schedule_auto_dismiss(alarm_id)
 
-            # If it's a one-time alarm, disable it
             if not alarm.get("repeat_days"):
                 self.storage.toggle_alarm(alarm_id, False)
                 _LOGGER.info("Disabled one-time alarm %d", alarm_id)
             else:
-                # Reschedule repeating alarm for next occurrence
                 await self._schedule_alarm(alarm)
 
         except Exception as e:
             _LOGGER.error("Error triggering alarm %d: %s", alarm_id, e)
+
+    async def _save_volume_state(self, media_player: str | None = None):
+        """Save the current volume state of the media player before changing it."""
+        config_data = self.hass.data.get(DOMAIN, {}).get("config", {})
+        player = media_player or config_data.get(CONF_MEDIA_PLAYER)
+        if not player:
+            return
+
+        saved_volumes = self.hass.data.setdefault(DOMAIN, {}).setdefault("saved_volumes", {})
+        # Only save if not already saved (to avoid overwriting with the alarm volume on loop)
+        if player not in saved_volumes:
+            state = self.hass.states.get(player)
+            if state and "volume_level" in state.attributes:
+                current_vol = state.attributes.get("volume_level")
+                if current_vol is not None:
+                    saved_volumes[player] = current_vol
+                    _LOGGER.debug("Saved pre-alarm volume %s for %s", current_vol, player)
+
+    async def _restore_volume_state(self, media_player: str | None = None):
+        """Restore the media player volume back to its pre-alarm level."""
+        saved_volumes = self.hass.data.get(DOMAIN, {}).get("saved_volumes", {})
+        if not saved_volumes:
+            return
+
+        config_data = self.hass.data.get(DOMAIN, {}).get("config", {})
+        target_player = media_player or config_data.get(CONF_MEDIA_PLAYER)
+
+        players_to_restore = [target_player] if target_player else list(saved_volumes.keys())
+
+        for player in list(players_to_restore):
+            if player in saved_volumes:
+                prev_volume = saved_volumes.pop(player, None)
+                if prev_volume is not None:
+                    try:
+                        await self.hass.services.async_call(
+                            "media_player",
+                            "volume_set",
+                            {"entity_id": player, "volume_level": prev_volume},
+                            blocking=False,
+                        )
+                        _LOGGER.info("Restored pre-alarm volume for %s to %s", player, prev_volume)
+                    except Exception as e:
+                        _LOGGER.warning("Could not restore volume for %s: %s", player, e)
 
     async def _play_alarm_sound(self, sound: str, media_player_override: str | None = None):
         """Play the alarm sound using a media player."""
@@ -225,15 +239,10 @@ class AlarmManager:
             return
 
         try:
-            # Get custom file path if sound is "custom"
             if sound == "custom":
                 custom_path = config_data.get("custom_sound_path")
-                if custom_path:
-                    sound_file = custom_path
-                else:
-                    sound_file = "/local/alarm_sounds/custom.mp3"
+                sound_file = custom_path if custom_path else "/local/alarm_sounds/custom.mp3"
             else:
-                # Map sound names to file paths or URLs
                 sound_map = {
                     "default": "/local/alarm_sounds/default.mp3",
                     "gentle": "/local/alarm_sounds/gentle.mp3",
@@ -243,7 +252,7 @@ class AlarmManager:
                 }
                 sound_file = sound_map.get(sound, sound_map["default"])
 
-            # Set volume
+            # Set alarm volume
             await self.hass.services.async_call(
                 "media_player",
                 "volume_set",
@@ -301,18 +310,7 @@ class AlarmManager:
             task.cancel()
 
     async def _ringing_watchdog(self, alarm_id: int, sound: str, media_player: str):
-        """Restart alarm playback whenever it stops while the alarm is ringing.
-
-        Saying the wake word makes the voice satellite stop the alarm sound to
-        listen, and short sound files simply end. In both cases the alarm is
-        still ringing (not stopped or snoozed), so the sound must come back.
-        Before restarting, wait for a running voice interaction to finish so
-        a "stop alarm" or "snooze" command gets a chance to be handled.
-
-        The LED ring gets the same treatment: the device firmware may repaint
-        it when playback starts or after a voice interaction, so the alarm
-        color is applied again each time playback is seen running.
-        """
+        """Restart alarm playback whenever it stops while the alarm is ringing."""
         try:
             led_refreshed = False
             while self._is_ringing(alarm_id):
@@ -328,8 +326,6 @@ class AlarmManager:
                     continue
                 led_refreshed = False
 
-                # Playback stopped - give a possible voice interaction time
-                # to stop or snooze the alarm before restarting the sound
                 await asyncio.sleep(RINGING_RESTART_GRACE)
                 while self._is_ringing(alarm_id) and self._satellite_busy(media_player):
                     await asyncio.sleep(RINGING_CHECK_INTERVAL)
@@ -340,7 +336,6 @@ class AlarmManager:
                 await self._play_alarm_sound(sound, media_player_override=media_player)
 
                 if not self._is_ringing(alarm_id):
-                    # Alarm was stopped while we were restarting - silence it again
                     await self.hass.services.async_call(
                         "media_player",
                         "media_stop",
@@ -372,25 +367,20 @@ class AlarmManager:
         """Schedule automatic dismissal of a ringing alarm."""
         from homeassistant.helpers.event import async_call_later
 
-        # Get auto-dismiss duration from config or use default
         config_data = self.hass.data.get(DOMAIN, {}).get("config", {})
         auto_dismiss_minutes = config_data.get(
             CONF_AUTO_DISMISS_DURATION, DEFAULT_AUTO_DISMISS_DURATION
         )
 
         async def auto_dismiss_callback(now):
-            """Callback to automatically dismiss the alarm."""
             _LOGGER.info("Auto-dismissing alarm %d after %d minutes", alarm_id, auto_dismiss_minutes)
 
-            # Stop the ringing watchdog so it doesn't restart the sound
             self.cancel_ringing_watchdog(alarm_id)
 
-            # Remove from ringing alarms and get per-alarm media player
             ringing_alarms = self.hass.data.get(DOMAIN, {}).get("ringing_alarms", {})
             alarm_data = ringing_alarms.pop(alarm_id, {})
             media_player = alarm_data.get("media_player") or config_data.get(CONF_MEDIA_PLAYER)
 
-            # Stop media player
             if media_player:
                 try:
                     await self.hass.services.async_call(
@@ -402,7 +392,6 @@ class AlarmManager:
                 except Exception as e:
                     _LOGGER.warning("Could not stop media player during auto-dismiss: %s", e)
 
-            # Dismiss notification
             try:
                 await self.hass.services.async_call(
                     "persistent_notification",
@@ -413,14 +402,13 @@ class AlarmManager:
             except Exception as e:
                 _LOGGER.warning("Could not dismiss notification during auto-dismiss: %s", e)
 
-            # Restore LED if no more ringing alarms
+            # Restore LED & Volume if no more ringing alarms
             if not self.hass.data.get(DOMAIN, {}).get("ringing_alarms"):
                 await self._restore_led_state()
+                await self._restore_volume_state(media_player)
 
-            # Remove the timer from tracking
             self._auto_dismiss_timers.pop(alarm_id, None)
 
-        # Schedule the auto-dismiss
         cancel_timer = async_call_later(
             self.hass, auto_dismiss_minutes * 60, auto_dismiss_callback
         )
@@ -457,7 +445,6 @@ class AlarmManager:
 
         state = self.hass.states.get(led_entity)
         if state is None or state.state == "unavailable":
-            # Warn only once, this is called repeatedly while an alarm rings
             if not self._led_unavailable_warned:
                 _LOGGER.warning(
                     "LED ring entity %s is not available, cannot set alarm color",
@@ -467,7 +454,6 @@ class AlarmManager:
             return
         self._led_unavailable_warned = False
 
-        # Only save state if not already saved (first alarm to ring)
         if "saved_led_state" not in self.hass.data.get(DOMAIN, {}):
             await self._save_led_state()
 
@@ -518,12 +504,10 @@ class AlarmManager:
         """Reschedule all alarms (useful after configuration changes)."""
         _LOGGER.info("Rescheduling all alarms")
 
-        # Cancel existing timers
         for timer_cancel in self._scheduled_timers.values():
             timer_cancel()
         self._scheduled_timers.clear()
 
-        # Reload and reschedule
         alarms = self.storage.get_enabled_alarms()
         for alarm in alarms:
             await self._schedule_alarm(alarm)
