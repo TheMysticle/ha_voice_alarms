@@ -13,6 +13,7 @@ from .alarm_manager import AlarmManager
 from .const import ADDON_NAME
 from .llm_functions import cleanup_llm_functions, setup_llm_functions
 from .timer_manager import TimerManager
+from .extended_openai_integration import patch_extended_openai
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -41,6 +42,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Set up LLM functions
     config_data = {**entry.data, **entry.options}
     await setup_llm_functions(hass, config_data)
+
+    # Patch Extended OpenAI Conversation integration if installed
+    patch_extended_openai(hass)
 
     # Start the alarm manager
     await alarm_manager.start()
