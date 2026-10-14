@@ -4,13 +4,22 @@ import voluptuous as vol
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import llm
+from homeassistant.loader import async_get_integration
 from .const import DOMAIN, ALARM_SERVICES_PROMPT
 
 _LOGGER = logging.getLogger(__name__)
 
-def patch_extended_openai(hass: HomeAssistant) -> None:
+async def async_patch_extended_openai(hass: HomeAssistant) -> None:
     """Patch Extended OpenAI Conversation to inject Alarm Assistant tools automatically."""
     
+    # 1. Force Home Assistant to resolve the Extended OpenAI component
+    # This guarantees Python can find the custom_components.extended_openai_conversation path.
+    try:
+        await async_get_integration(hass, "extended_openai_conversation")
+    except Exception:
+        # If the integration truly isn't installed, quietly exit.
+        return
+
     _LOGGER.warning("Attempting to patch Extended OpenAI Conversation...")
 
     try:
@@ -18,19 +27,19 @@ def patch_extended_openai(hass: HomeAssistant) -> None:
         from custom_components.extended_openai_conversation.conversation import ExtendedOpenAIAgentEntity
         from voluptuous_openapi import convert
     except ImportError as e:
-        _LOGGER.warning("FAILED to patch Extended OpenAI: Could not import required modules. Error: %s", e)
+        _LOGGER.warning("FAILED to patch Extended OpenAI: Modules missing. Error: %s", e)
         return
     except Exception as e:
-        _LOGGER.error("FAILED to patch Extended OpenAI due to unexpected error: %s", e)
+        _LOGGER.error("FAILED to patch Extended OpenAI: Unexpected error: %s", e)
         return
 
     if "alarm_assistant" in FUNCTIONS:
-        _LOGGER.warning("Extended OpenAI was already patched by Alarm Assistant.")
+        _LOGGER.warning("Extended OpenAI was already patched.")
         return
 
     _LOGGER.warning("SUCCESS: Patching Extended OpenAI Conversation to add Voice Alarm Assistant tools!")
 
-    # 1. Create a custom Function type to translate Extended OpenAI format -> HA LLM Tool format
+    # 2. Custom Function type to translate Extended OpenAI format -> HA LLM Tool format
     class AlarmAssistantFunction(Function):
         def __init__(self):
             super().__init__(vol.Schema({
@@ -39,7 +48,6 @@ def patch_extended_openai(hass: HomeAssistant) -> None:
 
         async def execute(self, hass_internal: HomeAssistant, function_config: dict, arguments: dict, llm_context, exposed_entities):
             tool_name = function_config["tool_name"]
-
             api = hass_internal.data.get(DOMAIN, {}).get("api")
             if not api:
                 return {"error": "Voice Alarm Assistant API not initialized"}
@@ -54,7 +62,6 @@ def patch_extended_openai(hass: HomeAssistant) -> None:
 
             try:
                 result = await target_tool.async_call(hass_internal, tool_input, llm_context)
-                # Extended OpenAI expects dict responses
                 if not isinstance(result, dict):
                     return {"result": result}
                 return result
@@ -62,22 +69,19 @@ def patch_extended_openai(hass: HomeAssistant) -> None:
                 _LOGGER.error("Error executing %s: %s", tool_name, e)
                 return {"error": str(e)}
 
-    # Register the new function type
+    # Register the function
     FUNCTIONS["alarm_assistant"] = AlarmAssistantFunction()
 
-    # 2. Monkey-patch _get_function_tools to auto-inject your LLM tools without YAML config
+    # 3. Auto-inject the tools without YAML config
     orig_get_function_tools = ExtendedOpenAIAgentEntity._get_function_tools
 
     def _patched_get_function_tools(self) -> list[dict]:
-        # Get whatever tools the user manually configured
         tools = list(orig_get_function_tools(self))
-        
-        api = hass.data.get(DOMAIN, {}).get("api")
+        api = self.hass.data.get(DOMAIN, {}).get("api")
         if not api:
             return tools
 
         for t in api.get_enabled_tools():
-            # Skip if user already defined a tool with the same name manually
             if any(existing.get("spec", {}).get("name") == t.name for existing in tools):
                 continue
 
@@ -99,21 +103,18 @@ def patch_extended_openai(hass: HomeAssistant) -> None:
                 })
             }
             tools.append(tool_dict)
-
         return tools
 
     ExtendedOpenAIAgentEntity._get_function_tools = _patched_get_function_tools
 
-    # 3. Monkey-patch _build_system_prompt to inform the LLM *how* to use the alarms
+    # 4. Inform the LLM HOW to use the alarms
     orig_build_system_prompt = ExtendedOpenAIAgentEntity._build_system_prompt
 
     def _patched_build_system_prompt(self, exposed_entities, llm_context, user_input) -> str:
         base_prompt = orig_build_system_prompt(self, exposed_entities, llm_context, user_input)
-        
-        api = hass.data.get(DOMAIN, {}).get("api")
+        api = self.hass.data.get(DOMAIN, {}).get("api")
         if api and api.get_enabled_tools():
             return f"{base_prompt}\n\n{ALARM_SERVICES_PROMPT}"
-            
         return base_prompt
 
     ExtendedOpenAIAgentEntity._build_system_prompt = _patched_build_system_prompt
