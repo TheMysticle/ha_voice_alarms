@@ -1,5 +1,6 @@
 """Integration with Extended OpenAI Conversation custom component (v2.x Stable)."""
 import logging
+import voluptuous as vol
 
 from homeassistant.core import HomeAssistant, Event
 from homeassistant.helpers import llm
@@ -8,17 +9,64 @@ from .const import DOMAIN, ALARM_SERVICES_PROMPT
 
 _LOGGER = logging.getLogger(__name__)
 
-# Track if we've successfully patched to avoid doing it twice
 _PATCHED = False
+
+
+def _schema_to_json(schema: vol.Schema) -> dict:
+    """Convert Voluptuous schema to OpenAI JSON schema without external dependencies."""
+    properties = {}
+    required = []
+
+    schema_dict = getattr(schema, "schema", {})
+    if isinstance(schema_dict, dict):
+        for key, value in schema_dict.items():
+            k_name = getattr(key, "schema", str(key))
+            k_desc = getattr(key, "description", None)
+
+            # Check if field is required
+            if isinstance(key, vol.Required):
+                required.append(k_name)
+
+            prop_info = {}
+            if k_desc:
+                prop_info["description"] = k_desc
+
+            # Map Python types to JSON Schema types
+            if value is str or value == str:
+                prop_info["type"] = "string"
+            elif value is int or value == int:
+                prop_info["type"] = "integer"
+            elif value is bool or value == bool:
+                prop_info["type"] = "boolean"
+            elif value is float or value == float:
+                prop_info["type"] = "number"
+            elif isinstance(value, list):
+                prop_info["type"] = "array"
+                if value and (value[0] is str or value[0] == str):
+                    prop_info["items"] = {"type": "string"}
+                elif value and (value[0] is int or value[0] == int):
+                    prop_info["items"] = {"type": "integer"}
+                else:
+                    prop_info["items"] = {"type": "string"}
+            else:
+                prop_info["type"] = "string"
+
+            properties[k_name] = prop_info
+
+    result = {"type": "object", "properties": properties}
+    if required:
+        result["required"] = required
+    return result
+
 
 async def async_patch_extended_openai(hass: HomeAssistant) -> None:
     """Attempt to patch Extended OpenAI. If it's not loaded yet, wait for it."""
-    
+
     async def _apply_patch(event: Event | None = None) -> None:
         global _PATCHED
         if _PATCHED:
             return
-            
+
         # If triggered by an event, check if the component loaded was the one we want
         if event is not None and event.data.get("component") != "extended_openai_conversation":
             return
@@ -27,10 +75,7 @@ async def async_patch_extended_openai(hass: HomeAssistant) -> None:
             # v2.x architecture imports
             from custom_components.extended_openai_conversation.helpers import FUNCTION_EXECUTORS, FunctionExecutor
             from custom_components.extended_openai_conversation.conversation import ExtendedOpenAIAgentEntity
-            from voluptuous_openapi import convert
-            import voluptuous as vol
         except ImportError as e:
-            # If we were explicitly triggered by the event, the module should exist.
             if event is not None:
                 _LOGGER.error("Extended OpenAI loaded, but modules are missing: %s", e)
             return
@@ -78,7 +123,6 @@ async def async_patch_extended_openai(hass: HomeAssistant) -> None:
 
                 try:
                     result = await target_tool.async_call(hass_internal, tool_input, llm_context)
-                    # Extended OpenAI expects dict responses
                     if not isinstance(result, dict):
                         return {"result": result}
                     return result
@@ -95,7 +139,7 @@ async def async_patch_extended_openai(hass: HomeAssistant) -> None:
         def _patched_get_functions(self) -> list[dict]:
             # Get whatever tools the user manually configured
             tools = list(orig_get_functions(self))
-            
+
             api = self.hass.data.get(DOMAIN, {}).get("api")
             if not api:
                 return tools
@@ -105,11 +149,7 @@ async def async_patch_extended_openai(hass: HomeAssistant) -> None:
                 if any(existing.get("spec", {}).get("name") == t.name for existing in tools):
                     continue
 
-                parameters = convert(t.parameters)
-                if "type" not in parameters:
-                    parameters["type"] = "object"
-                if "properties" not in parameters:
-                    parameters["properties"] = {}
+                parameters = _schema_to_json(t.parameters)
 
                 tool_dict = {
                     "spec": {
@@ -133,20 +173,18 @@ async def async_patch_extended_openai(hass: HomeAssistant) -> None:
 
         def _patched_async_generate_prompt(self, raw_prompt, exposed_entities, user_input) -> str:
             base_prompt = orig_async_generate_prompt(self, raw_prompt, exposed_entities, user_input)
-            
+
             api = self.hass.data.get(DOMAIN, {}).get("api")
             if api and api.get_enabled_tools():
                 return f"{base_prompt}\n\n{ALARM_SERVICES_PROMPT}"
-                
+
             return base_prompt
 
         ExtendedOpenAIAgentEntity._async_generate_prompt = _patched_async_generate_prompt
-        
+
         _PATCHED = True
 
-    # 1. Run immediately in case Extended OpenAI is already loaded
     await _apply_patch()
-    
-    # 2. If it wasn't loaded, listen for the event bus to tell us when it is!
+
     if not _PATCHED:
         hass.bus.async_listen(EVENT_COMPONENT_LOADED, _apply_patch)
