@@ -1,4 +1,5 @@
 """Integration with Extended OpenAI Conversation custom component (v2.x Stable)."""
+import json
 import logging
 import voluptuous as vol
 
@@ -81,7 +82,6 @@ async def async_patch_extended_openai(hass: HomeAssistant) -> None:
             return FUNCTION_EXECUTORS, FunctionExecutor, ExtendedOpenAIAgentEntity
 
         try:
-            # Import in executor to avoid Home Assistant's blocking call warnings
             FUNCTION_EXECUTORS, FunctionExecutor, ExtendedOpenAIAgentEntity = (
                 await hass.async_add_executor_job(_import_modules)
             )
@@ -109,35 +109,41 @@ async def async_patch_extended_openai(hass: HomeAssistant) -> None:
             async def execute(self, hass_internal: HomeAssistant, function: dict, arguments: dict, user_input, exposed_entities):
                 tool_name = function.get("tool_name")
 
-                api = hass_internal.data.get(DOMAIN, {}).get("api")
-                if not api:
-                    return {"error": "Voice Alarm Assistant API not initialized"}
-
-                tools = api.get_enabled_tools()
-                target_tool = next((t for t in tools if t.name == tool_name), None)
-
-                if not target_tool:
-                    return {"error": f"Tool {tool_name} not found"}
-
-                llm_context = llm.LLMContext(
-                    platform=DOMAIN,
-                    context=user_input.context,
-                    user_prompt=user_input.text,
-                    language=user_input.language,
-                    assist_custom_language=user_input.language,
-                    device_id=user_input.device_id,
-                )
-
-                tool_input = llm.ToolInput(tool_name=tool_name, tool_args=arguments)
-
                 try:
+                    api = hass_internal.data.get(DOMAIN, {}).get("api")
+                    if not api:
+                        return "Error: Voice Alarm Assistant API not initialized"
+
+                    tools = api.get_enabled_tools()
+                    target_tool = next((t for t in tools if t.name == tool_name), None)
+
+                    if not target_tool:
+                        return f"Error: Tool {tool_name} not found"
+
+                    # Safely extract or build LLMContext without keyword errors
+                    if hasattr(user_input, "as_llm_context"):
+                        llm_context = user_input.as_llm_context(DOMAIN)
+                    else:
+                        llm_context = None
+
+                    # Safe tool input structure
+                    class _ToolInput:
+                        def __init__(self, name, args):
+                            self.tool_name = name
+                            self.tool_args = args
+                            self.id = name
+
+                    tool_input = _ToolInput(tool_name, arguments)
+
                     result = await target_tool.async_call(hass_internal, tool_input, llm_context)
-                    if not isinstance(result, dict):
-                        return {"result": result}
-                    return result
+                    
+                    if isinstance(result, (dict, list)):
+                        return json.dumps(result)
+                    return str(result)
+
                 except Exception as e:
-                    _LOGGER.error("Error executing %s: %s", tool_name, e)
-                    return {"error": str(e)}
+                    _LOGGER.exception("Error executing %s: %s", tool_name, e)
+                    return f"Error executing tool: {e}"
 
         FUNCTION_EXECUTORS["alarm_assistant"] = AlarmAssistantFunctionExecutor()
 
