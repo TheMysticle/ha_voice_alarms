@@ -10,18 +10,25 @@ _LOGGER = logging.getLogger(__name__)
 
 def patch_extended_openai(hass: HomeAssistant) -> None:
     """Patch Extended OpenAI Conversation to inject Alarm Assistant tools automatically."""
+    
+    _LOGGER.warning("Attempting to patch Extended OpenAI Conversation...")
+
     try:
         from custom_components.extended_openai_conversation.functions import FUNCTIONS, Function
         from custom_components.extended_openai_conversation.conversation import ExtendedOpenAIAgentEntity
         from voluptuous_openapi import convert
-    except ImportError:
-        # Extended OpenAI is not installed; nothing to do.
+    except ImportError as e:
+        _LOGGER.warning("FAILED to patch Extended OpenAI: Could not import required modules. Error: %s", e)
+        return
+    except Exception as e:
+        _LOGGER.error("FAILED to patch Extended OpenAI due to unexpected error: %s", e)
         return
 
     if "alarm_assistant" in FUNCTIONS:
-        return  # We've already patched the registry
+        _LOGGER.warning("Extended OpenAI was already patched by Alarm Assistant.")
+        return
 
-    _LOGGER.info("Patching Extended OpenAI Conversation to add Voice Alarm Assistant tools.")
+    _LOGGER.warning("SUCCESS: Patching Extended OpenAI Conversation to add Voice Alarm Assistant tools!")
 
     # 1. Create a custom Function type to translate Extended OpenAI format -> HA LLM Tool format
     class AlarmAssistantFunction(Function):
