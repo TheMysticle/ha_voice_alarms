@@ -67,14 +67,24 @@ async def async_patch_extended_openai(hass: HomeAssistant) -> None:
         if _PATCHED:
             return
 
-        # If triggered by an event, check if the component loaded was the one we want
         if event is not None and event.data.get("component") != "extended_openai_conversation":
             return
 
+        def _import_modules():
+            from custom_components.extended_openai_conversation.helpers import (
+                FUNCTION_EXECUTORS,
+                FunctionExecutor,
+            )
+            from custom_components.extended_openai_conversation.conversation import (
+                ExtendedOpenAIAgentEntity,
+            )
+            return FUNCTION_EXECUTORS, FunctionExecutor, ExtendedOpenAIAgentEntity
+
         try:
-            # v2.x architecture imports
-            from custom_components.extended_openai_conversation.helpers import FUNCTION_EXECUTORS, FunctionExecutor
-            from custom_components.extended_openai_conversation.conversation import ExtendedOpenAIAgentEntity
+            # Import in executor to avoid Home Assistant's blocking call warnings
+            FUNCTION_EXECUTORS, FunctionExecutor, ExtendedOpenAIAgentEntity = (
+                await hass.async_add_executor_job(_import_modules)
+            )
         except ImportError as e:
             if event is not None:
                 _LOGGER.error("Extended OpenAI loaded, but modules are missing: %s", e)
@@ -109,7 +119,6 @@ async def async_patch_extended_openai(hass: HomeAssistant) -> None:
                 if not target_tool:
                     return {"error": f"Tool {tool_name} not found"}
 
-                # Construct an LLMContext from user_input for HA's built-in tool system
                 llm_context = llm.LLMContext(
                     platform=DOMAIN,
                     context=user_input.context,
@@ -130,14 +139,12 @@ async def async_patch_extended_openai(hass: HomeAssistant) -> None:
                     _LOGGER.error("Error executing %s: %s", tool_name, e)
                     return {"error": str(e)}
 
-        # Register the new executor into Extended OpenAI's v2.x dictionary
         FUNCTION_EXECUTORS["alarm_assistant"] = AlarmAssistantFunctionExecutor()
 
         # 2. Monkey-patch get_functions to auto-inject your LLM tools
         orig_get_functions = ExtendedOpenAIAgentEntity.get_functions
 
         def _patched_get_functions(self) -> list[dict]:
-            # Get whatever tools the user manually configured
             tools = list(orig_get_functions(self))
 
             api = self.hass.data.get(DOMAIN, {}).get("api")
@@ -145,7 +152,6 @@ async def async_patch_extended_openai(hass: HomeAssistant) -> None:
                 return tools
 
             for t in api.get_enabled_tools():
-                # Skip if user already defined a tool with the same name manually
                 if any(existing.get("spec", {}).get("name") == t.name for existing in tools):
                     continue
 
@@ -168,7 +174,7 @@ async def async_patch_extended_openai(hass: HomeAssistant) -> None:
 
         ExtendedOpenAIAgentEntity.get_functions = _patched_get_functions
 
-        # 3. Monkey-patch _async_generate_prompt to inform the LLM *how* to use the alarms
+        # 3. Monkey-patch _async_generate_prompt
         orig_async_generate_prompt = ExtendedOpenAIAgentEntity._async_generate_prompt
 
         def _patched_async_generate_prompt(self, raw_prompt, exposed_entities, user_input) -> str:
